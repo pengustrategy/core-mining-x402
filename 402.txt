@@ -1,0 +1,1273 @@
+https://docs.cdp.coinbase.com/x402/welcome
+
+https://docs.cdp.coinbase.com/x402/quickstart-for-buyers
+
+https://docs.cdp.coinbase.com/x402/quickstart-for-sellers
+
+https://docs.cdp.coinbase.com/x402/bazaar
+
+https://docs.cdp.coinbase.com/x402/core-concepts/how-it-works
+
+https://docs.cdp.coinbase.com/x402/core-concepts/http-402
+
+https://docs.cdp.coinbase.com/x402/core-concepts/client-server
+
+https://docs.cdp.coinbase.com/x402/core-concepts/facilitator
+
+https://docs.cdp.coinbase.com/x402/core-concepts/wallet
+
+https://docs.cdp.coinbase.com/x402/network-support
+
+https://docs.cdp.coinbase.com/x402/miniapps
+
+https://docs.cdp.coinbase.com/x402/mcp-server
+
+x402
+Welcome to x402
+
+Copy page
+
+​
+Overview
+x402 is a new open payment protocol developed by Coinbase that enables instant, automatic stablecoin payments directly over HTTP.
+By reviving the HTTP 402 Payment Required status code, x402 lets services monetize APIs and digital content onchain, allowing clients, both human and machine, to programmatically pay for access without accounts, sessions, or complex authentication.
+​
+Who is x402 for?
+Sellers: Service providers who want to monetize their APIs or content. x402 enables direct, programmatic payments from clients with minimal setup.
+Buyers: Human developers and AI agents seeking to access paid services without accounts or manual payment flows.
+Both sellers and buyers interact directly through HTTP requests, with payment handled transparently through the protocol.
+​
+Use cases
+x402 enables a range of use cases, including:
+API services paid per request
+AI agents that autonomously pay for API access
+Paywalls for digital content
+Microservices and tooling monetized via microtransactions
+Proxy services that aggregate and resell API capabilities
+​
+How it works
+x402 uses a simple request-response flow with programmatic payments. For a detailed explanation, see How x402 Works.
+At a high level:
+The buyer requests a resource from the server (e.g. an API call, see client/server roles)
+If payment is required, the server responds with a 402 Payment Required, including payment instructions
+The buyer constructs and sends a payment payload
+The server verifies and settles the payment via the facilitator. If valid, the server returns the requested resource
+​
+Beyond legacy limitations
+x402 is designed for a modern internet economy, solving key limitations of legacy systems:
+Reduce fees and friction: Direct onchain payments without intermediaries, high fees, or manual setup.
+Micropayments & usage-based billing: Charge per call or feature with simple, programmable pay-as-you-go flows.
+Machine-to-machine transactions: Let AI agents pay and access services autonomously with no keys or human input needed.
+​
+Offload your infra
+The x402 Facilitator handles payment verification and settlement so that sellers don’t need to maintain their own blockchain infrastructure.
+The Coinbase Developer Platform (CDP) offers a Coinbase-hosted facilitator service that processes fee-free USDC payments on the Base network, offering a streamlined and predictable experience for both buyers and sellers.
+Facilitators handle verification and settlement, so sellers do not need to maintain blockchain infrastructure.
+CDP’s x402 facilitator provides:
+Fee-free USDC payments on the Base network
+Fast, onchain settlement of transactions
+Simplified setup for sellers to start accepting payments
+​
+Facilitator roadmap
+CDP’s x402 facilitator is designed as a facilitator on top of an open standard, which is not tied to any single provider. Over time, the facilitator will include:
+A discovery layer for buyers (human and agents) to find available services
+Support for additional payment flows (e.g., pay for work done, credit based billing, etc.)
+Optional attestations for sellers to enforce KYC or geographic restrictions
+Support for additional assets and networks
+The goal is to make programmatic commerce accessible, permissionless, and developer-friendly.
+​
+What to read next
+Quickstart for Sellers: Get started with x402 by accepting payments from clients.
+Quickstart for Buyers: Get started with x402 by paying for services.
+Network Support: See available facilitators and supported networks.
+How x402 Works: Understand the complete payment flow.
+Join our community on Discord: Get help and stay up to date with the latest developments.
+
+
+
+
+# Quickstart for Buyers
+
+This guide walks you through how to use **x402** to interact with services that require payment. By the end of this guide, you will be able to programmatically discover payment requirements, complete a payment, and access a paid resource.
+
+The x402 helper packages for various languages greatly simplify your integration with x402. You'll be able to automatically detect payment challenges, authorize payments onchain, and retry requests — all with minimal code. The packages will automatically trigger the following flow:
+
+1. Makes the initial request (if using Fetch) or intercepts the initial request (if using Axios/HTTPX/Requests)
+2. If a 402 response is received, parses the payment requirements
+3. Verifies the payment amount is within the allowed maximum
+4. Creates a payment header using the provided wallet client
+5. Retries the request with the payment header
+
+## Prerequisites
+
+Before you begin, ensure you have:
+
+* A crypto wallet with USDC (any EVM-compatible wallet, e.g., [CDP Wallet](/server-wallets/v1/concepts/wallets), [AgentKit](/agent-kit/welcome))
+* [Node.js](https://nodejs.org/en) and npm, or Python and pip
+* A service that requires payment via x402
+
+<Info>
+  We have pre-configured [examples available in our repo](https://github.com/coinbase/x402/tree/main/examples), including examples for fetch, Axios, and MCP.
+</Info>
+
+## 1. Install Dependencies
+
+<Tabs>
+  <Tab title="Node.js">
+    Install [x402-axios](https://www.npmjs.com/package/x402-axios) or [x402-fetch](https://www.npmjs.com/package/x402-fetch):
+
+    ```bash lines wrap theme={null}
+    npm install x402-axios
+    # or
+    npm install x402-fetch
+    ```
+  </Tab>
+
+  <Tab title="Python">
+    Install the [x402 package](https://pypi.org/project/x402/):
+
+    ```bash lines wrap theme={null}
+    pip install x402
+    ```
+  </Tab>
+</Tabs>
+
+## 2. Create a Wallet Client
+
+Create a wallet client using CDP's [Server Wallet](/server-wallets/v1/concepts/wallets) (recommended) or a standalone wallet library ([viem](https://viem.sh/) for EVM on Node.js, [eth-account](https://github.com/ethereum/eth-account) for EVM on Python, or [SolanaKit](https://www.solanakit.com/) for Solana support).
+
+### CDP Server Wallet (Recommended)
+
+First, create an account at [cdp.coinbase.com](https://cdp.coinbase.com/) and get the following API keys from the portal to store as environment variables:
+
+```bash  theme={null}
+# store in .env or using the command `export <name>="secret-info"`
+CDP_API_KEY_ID=your-api-key-id
+CDP_API_KEY_SECRET=your-api-key-secret
+CDP_WALLET_SECRET=your-wallet-secret
+```
+
+Then, install the required packages:
+
+<CodeGroup>
+  ```bash Node.js theme={null}
+  npm install @coinbase/cdp-sdk dotenv
+  ```
+
+  ```bash Python theme={null}
+  pip install cdp python-dotenv
+  ```
+</CodeGroup>
+
+Finally, instantiate the CDP client as suggested by the [Server Wallet Quickstart](/server-wallets/v2/introduction/quickstart):
+
+<CodeGroup>
+  ```typescript Node.js theme={null}
+  import { CdpClient } from "@coinbase/cdp-sdk";
+  import { toAccount } from "viem/accounts";
+  import dotenv from "dotenv";
+
+  dotenv.config()
+
+  const cdp = new CdpClient();
+  const cdpAccount = await cdp.evm.createAccount();
+  const account = toAccount(cdpAccount);
+  ```
+
+  ```python Python theme={null}
+  import asyncio
+  from cdp import CdpClient
+  from dotenv import load_dotenv
+
+  load_dotenv()
+
+  cdp = CdpClient()
+  account = await cdp.evm.create_account()
+  ```
+</CodeGroup>
+
+### Standalone Wallet Libraries
+
+If you prefer to use your own wallet, you can use standalone libraries:
+
+#### EVM
+
+<Tabs>
+  <Tab title="Node.js (viem)">
+    Install the required package:
+
+    ```bash  theme={null}
+    npm install viem
+    ```
+
+    Then instantiate the wallet account:
+
+    ```typescript  theme={null}
+    import { createWalletClient, http } from "viem";
+    import { privateKeyToAccount } from "viem/accounts";
+    import { baseSepolia } from "viem/chains";
+
+    // Create a wallet client (using your private key)
+    const account = privateKeyToAccount("0xYourPrivateKey"); // we recommend using an environment variable for this
+    ```
+  </Tab>
+
+  <Tab title="Python (eth-account)">
+    Install the required package:
+
+    ```bash  theme={null}
+    pip install eth_account
+    ```
+
+    Then instantiate the wallet account:
+
+    ```python  theme={null}
+    from eth_account import Account
+
+    account = Account.from_key("your_private_key") # we recommend using an environment variable for this
+    ```
+  </Tab>
+</Tabs>
+
+#### Solana (SVM)
+
+Use [SolanaKit](https://www.solanakit.com/) to instantiate a signer:
+
+```typescript  theme={null}
+import { createKeyPairSignerFromBytes } from "@solana/kit";
+import { base58 } from "@scure/base";
+
+// 64-byte base58 secret key (private + public)
+const signer = await createKeyPairSignerFromBytes(
+  base58.decode(process.env.SOLANA_PRIVATE_KEY!)
+);
+
+```
+
+## 3. Make Paid Requests Automatically
+
+You can automatically handle 402 Payment Required responses and complete payment flows using the x402 helper packages.
+
+<Tabs>
+  <Tab title="Node.js">
+    You can use either `x402-fetch` or `x402-axios`:
+
+    <Tabs>
+      <Tab title="x402-fetch">
+        **x402-fetch** extends the native `fetch` API to handle 402 responses and payment headers for you. [Full example here](https://github.com/coinbase/x402/tree/main/examples/typescript/clients/fetch)
+
+        ```typescript  theme={null}
+        import { wrapFetchWithPayment, decodeXPaymentResponse } from "x402-fetch";
+
+        const fetchWithPayment = wrapFetchWithPayment(fetch, account);
+
+        fetchWithPayment(url, { //url should be something like https://api.example.com/paid-endpoint
+        method: "GET",
+        })
+        .then(async response => {
+            const body = await response.json();
+            console.log(body);
+
+            const paymentResponse = decodeXPaymentResponse(response.headers.get("x-payment-response")!);
+            console.log(paymentResponse);
+        })
+        .catch(error => {
+            console.error(error.response?.data?.error);
+        });
+        ```
+
+        **Features:**
+
+        * Automatically handles 402 Payment Required responses
+        * Verifies payment and generates payment headers
+        * Retries the request with proof of payment
+        * Supports all standard fetch options
+      </Tab>
+
+      <Tab title="x402-axios">
+        **x402-axios** adds a payment interceptor to Axios, so your requests are retried with payment headers automatically. [Full example here](https://github.com/coinbase/x402/tree/main/examples/typescript/clients/axios)
+
+        ```typescript  theme={null}
+        import { withPaymentInterceptor, decodeXPaymentResponse } from "x402-axios";
+        import axios from "axios";
+
+        // Create an Axios instance with payment handling
+        const api = withPaymentInterceptor(
+        axios.create({
+            baseURL, // e.g. https://api.example.com
+        }),
+        account,
+        );
+
+        api
+        .get(endpointPath) // e.g. /paid-endpoint
+        .then(response => {
+            console.log(response.data);
+
+            const paymentResponse = decodeXPaymentResponse(response.headers["x-payment-response"]);
+            console.log(paymentResponse);
+        })
+        .catch(error => {
+            console.error(error.response?.data?.error);
+        });
+        ```
+
+        **Features:**
+
+        * Automatically handles 402 Payment Required responses
+        * Retries requests with payment headers
+        * Exposes payment response headers
+      </Tab>
+    </Tabs>
+  </Tab>
+
+  <Tab title="Python">
+    You can use either `httpx` or `Requests`:
+
+    * **Requests** is a well-established library for **synchronous** HTTP requests. Simple and ideal for straightforward, sequential workflows.
+    * **HTTPX** is a modern library that supports both **synchronous** and **asynchronous** HTTP requests. Use if you need high concurrency or async capabilities.
+
+    Both support a **simple** and **extensible** approach. The simple approach (shown below) returns a pre-configured client that handles payments automatically.
+
+    <Tabs>
+      <Tab title="HTTPX">
+        [Full example here](https://github.com/coinbase/x402/tree/main/examples/python/clients/httpx)
+
+        ```python  theme={null}
+        from x402.clients.httpx import x402HttpxClient
+        # Other imports...
+
+        # Wallet creation logic ...
+
+        # Create client and make request
+        async with x402HttpxClient(account=account, base_url="https://api.example.com") as client:
+            response = await client.get("/protected-endpoint")
+            print(await response.aread())
+        ```
+      </Tab>
+
+      <Tab title="Requests">
+        [Full example here](https://github.com/coinbase/x402/tree/main/examples/python/clients/requests)
+
+        ```python  theme={null}
+        from x402.clients.requests import x402_requests
+        # Other imports...
+
+        # Wallet creation logic ...
+
+        # Create session and make request
+        session = x402_requests(account)
+        response = session.get("https://api.example.com/protected-endpoint")
+        print(response.content)
+        ```
+      </Tab>
+    </Tabs>
+  </Tab>
+</Tabs>
+
+## 4. Discover Available Services (Optional)
+
+Instead of hardcoding endpoints, you can use the x402 Bazaar to dynamically discover available services. This is especially powerful for building autonomous agents that can find and use new capabilities.
+
+See the full example here for [Python](https://github.com/coinbase/x402/tree/main/examples/python/discovery) and [Node.js](https://github.com/coinbase/x402/tree/main/examples/typescript/discovery).
+
+<Tabs>
+  <Tab title="Node.js">
+    ```typescript  theme={null}
+    import { useFacilitator } from "x402/verify";
+    import { facilitator } from "@coinbase/x402";
+
+    // Get the list function from the facilitator
+    const { list } = useFacilitator(facilitator);
+
+    // Discover all available x402 services
+    const services = await list();
+    ```
+  </Tab>
+
+  <Tab title="Python">
+    ```python  theme={null}
+    from x402.facilitator import FacilitatorClient
+    from cdp.x402 import create_facilitator_config
+
+    # Set up facilitator client
+    facilitator_config = create_facilitator_config()
+    facilitator = FacilitatorClient(facilitator_config)
+
+    # Discover all available x402 services
+    services = await facilitator.list()
+    ```
+  </Tab>
+</Tabs>
+
+<Info>
+  Learn more about service discovery in the [x402 Bazaar documentation](/x402/bazaar), including how to filter services, understand their schemas, and build agents that can autonomously discover new capabilities.
+</Info>
+
+## 5. Error Handling
+
+Clients will throw errors if:
+
+* The request configuration is missing
+* A payment has already been attempted for the request
+* There is an error creating the payment header
+
+## Summary
+
+* Install an x402 client package
+* Create a wallet client
+* Use the provided wrapper/interceptor to make paid API requests
+* (Optional) Use the x402 Bazaar to discover services dynamically
+* Payment flows are handled automatically for you
+
+## References:
+
+* [x402-fetch npm docs](https://www.npmjs.com/package/x402-fetch)
+* [x402-axios npm docs](https://www.npmjs.com/package/x402-axios)
+* [x402 PyPi page](https://pypi.org/project/x402/)
+* [x402 Bazaar documentation](/x402/bazaar) - Discover available services
+
+For questions or support, join our [Discord](https://discord.gg/invite/cdp).
+
+
+
+
+
+# Quickstart for Sellers
+
+This guide walks you through integrating with x402 to enable payments for your API or service. By the end, your API will be able to charge buyers and AI agents for access.
+
+<Note>
+  This quickstart begins with testnet configuration for safe testing. When you're ready for production, see [Running on Mainnet](#running-on-mainnet) for the simple changes needed to accept real payments.
+</Note>
+
+## Prerequisites
+
+Before you begin, ensure you have:
+
+* A crypto wallet to receive funds (any EVM-compatible wallet, e.g., [CDP Wallet](/server-wallets/v1/concepts/wallets))
+* (Optional) A [Coinbase Developer Platform](https://cdp.coinbase.com) (CDP) account and API Keys
+  * Required for mainnet use until other facilitators go live
+* [Node.js](https://nodejs.org/en) and npm, or Python and pip installed
+* An existing API or server
+
+<Info>
+  We have pre-configured examples available in our repo for both [Node.js](https://github.com/coinbase/x402/tree/main/examples/typescript/servers) and [Python](https://github.com/coinbase/x402/tree/main/examples/python/servers). We also have an [advanced example](https://github.com/coinbase/x402/tree/main/examples/typescript/servers/advanced) that shows how to use the x402 SDKs to build a more complex payment flow.
+</Info>
+
+## 1. Install Dependencies
+
+<Tabs>
+  <Tab title="Node.js">
+    <Tabs>
+      <Tab title="Express">
+        Install the [x402 Express middleware package](https://www.npmjs.com/package/x402-express):
+
+        ```bash  theme={null}
+        npm install x402-express
+        npm install @coinbase/x402 # for the mainnet facilitator
+        ```
+      </Tab>
+
+      <Tab title="Next.js">
+        Install the [x402 Next.js middleware package](https://www.npmjs.com/package/x402-next):
+
+        ```bash  theme={null}
+        npm install x402-next
+        npm install @coinbase/x402 # for the mainnet facilitator
+        ```
+      </Tab>
+
+      <Tab title="Hono">
+        Install the [x402 Hono middleware package](https://www.npmjs.com/package/x402-hono):
+
+        ```bash  theme={null}
+        npm install x402-hono
+        npm install @coinbase/x402 # for the mainnet facilitator
+        ```
+      </Tab>
+    </Tabs>
+  </Tab>
+
+  <Tab title="Python">
+    Install the [x402 Python package](https://pypi.org/project/x402/):
+
+    ```bash  theme={null}
+    pip install x402
+    pip install cdp # for the mainnet facilitator
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  The mainnet facilitator packages (`@coinbase/x402` for Node.js, `cdp` for Python) are only needed for production. For testnet development, you can skip these. See [Running on Mainnet](#running-on-mainnet) for details.
+</Note>
+
+## 2. Add Payment Middleware
+
+Integrate the payment middleware into your application. You will need to provide:
+
+* The Facilitator URL or facilitator object. For testing, use `https://x402.org/facilitator` which works on Base Sepolia and Solana Devnet.
+  * For mainnet setup, see [Running on Mainnet](#running-on-mainnet)
+* The routes you want to protect
+* Your receiving wallet address
+
+<Tip>
+  The examples below show testnet configuration. When you're ready to accept real payments, refer to [Running on Mainnet](#running-on-mainnet) for the simple changes needed.
+</Tip>
+
+<Tabs>
+  <Tab title="Node.js">
+    <Tabs>
+      <Tab title="Express">
+        Full example in the repo [here](https://github.com/coinbase/x402/tree/main/examples/typescript/servers/express).
+
+        ```js  theme={null}
+        import express from "express";
+        import { paymentMiddleware, Network } from "x402-express";
+        // import { facilitator } from "@coinbase/x402"; // For mainnet
+
+        const app = express();
+
+        app.use(paymentMiddleware(
+          "0xYourAddress", // your receiving wallet address
+          {  // Route configurations for protected endpoints
+            "GET /weather": {
+              // USDC amount in dollars
+              price: "$0.001",
+              network: "base-sepolia", // for mainnet, see Running on Mainnet section
+              // Optional: Add metadata for better discovery in x402 Bazaar
+              config: {
+                description: "Get current weather data for any location",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    location: { type: "string", description: "City name" }
+                  }
+                },
+                outputSchema: {
+                  type: "object",
+                  properties: {
+                    weather: { type: "string" },
+                    temperature: { type: "number" }
+                  }
+                }
+              }
+            },
+          },
+          {
+            url: "https://x402.org/facilitator", // for testnet
+          }
+        ));
+
+        // Implement your route
+        app.get("/weather", (req, res) => {
+          res.send({
+            report: {
+              weather: "sunny",
+              temperature: 70,
+            },
+          });
+        });
+
+        app.listen(4021, () => {
+          console.log(`Server listening at http://localhost:4021`);
+        });
+        ```
+      </Tab>
+
+      <Tab title="Next.js">
+        Full example in the repo [here](https://github.com/coinbase/x402/tree/main/examples/typescript/fullstack/next).
+
+        ```js  theme={null}
+        import { paymentMiddleware, Network } from 'x402-next';
+        // import { facilitator } from "@coinbase/x402"; // For mainnet
+
+        // Configure the payment middleware
+        export const middleware = paymentMiddleware(
+          "0xYourAddress", // your receiving wallet address
+          {  // Route configurations for protected endpoints
+            '/protected': {
+              price: '$0.01',
+              network: "base-sepolia", // for mainnet, see Running on Mainnet section
+              config: {
+                description: 'Access to protected content',
+                // Optional: Add schemas for better discovery
+                inputSchema: {
+                  type: "object",
+                  properties: {}
+                },
+                outputSchema: {
+                  type: "object",
+                  properties: {
+                    content: { type: "string" }
+                  }
+                }
+              }
+            },
+          },
+          {
+            url: "https://x402.org/facilitator", // for testnet
+          }
+        );
+
+        // Configure which paths the middleware should run on
+        export const config = {
+          matcher: [
+            '/protected/:path*',
+          ]
+        };
+        ```
+      </Tab>
+
+      <Tab title="Hono">
+        Full example in the repo [here](https://github.com/coinbase/x402/tree/main/examples/typescript/servers/hono).
+
+        ```js  theme={null}
+        import { Hono } from "hono";
+        import { serve } from "@hono/node-server";
+        import { paymentMiddleware, Network } from "x402-hono";
+        // import { facilitator } from "@coinbase/x402"; // For mainnet
+
+        const app = new Hono();
+
+        // Configure the payment middleware
+        app.use(paymentMiddleware(
+          "0xYourAddress", // your receiving wallet address
+          {  // Route configurations for protected endpoints
+            "/protected-route": {
+              price: "$0.10",
+              network: "base-sepolia", // for mainnet, see Running on Mainnet section
+              config: {
+                description: "Access to premium content",
+              }
+            }
+          },
+          {
+            url: "https://x402.org/facilitator", // for testnet
+          }
+        ));
+
+        // Implement your route
+        app.get("/protected-route", (c) => {
+          return c.json({ message: "This content is behind a paywall" });
+        });
+
+        serve({
+          fetch: app.fetch,
+          port: 3000
+        });
+        ```
+      </Tab>
+    </Tabs>
+  </Tab>
+
+  <Tab title="Python">
+    <Tabs>
+      <Tab title="FastAPI">
+        Full example in the repo [here](https://github.com/coinbase/x402/tree/main/examples/python/servers/fastapi).
+
+        ```python  theme={null}
+        import os
+        from typing import Any, Dict
+        from dotenv import load_dotenv
+        from fastapi import FastAPI
+        from x402.fastapi.middleware import require_payment
+        from x402.types import EIP712Domain, TokenAmount, TokenAsset
+
+        # Load environment variables
+        load_dotenv()
+
+        app = FastAPI()
+
+        # Apply payment middleware to specific routes
+        app.middleware("http")(
+            require_payment(
+                path="/weather",
+                price="$0.001",
+                pay_to_address="0xYourAddress",
+                network_id="base-sepolia", # for mainnet, see Running on Mainnet section
+                # Optional: Add metadata for better discovery in x402 Bazaar
+                description="Get current weather data for any location",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string", "description": "City name"}
+                    }
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "weather": {"type": "string"},
+                        "temperature": {"type": "number"}
+                    }
+                }
+            )
+        )
+
+        @app.get("/weather")
+        async def get_weather() -> Dict[str, Any]:
+            return {
+                "report": {
+                    "weather": "sunny",
+                    "temperature": 70,
+                }
+            }
+        ```
+      </Tab>
+
+      <Tab title="Flask">
+        Full example in the repo [here](https://github.com/coinbase/x402/tree/main/examples/python/servers/flask).
+
+        ```python  theme={null}
+        import os
+        from flask import Flask, jsonify
+        from dotenv import load_dotenv
+        from x402.flask.middleware import PaymentMiddleware
+        from x402.types import EIP712Domain, TokenAmount, TokenAsset
+
+        # Load environment variables
+        load_dotenv()
+
+        app = Flask(__name__)
+
+        # Initialize payment middleware
+        payment_middleware = PaymentMiddleware(app)
+
+        # Apply payment middleware to specific routes
+        payment_middleware.add(
+            path="/weather",
+            price="$0.001",
+            pay_to_address="0xYourAddress",
+            network="base-sepolia", # for mainnet, see Running on Mainnet section
+            # Optional: Add metadata for better discovery in x402 Bazaar
+            description="Get current weather data for any location",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "City name"}
+                }
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "weather": {"type": "string"},
+                    "temperature": {"type": "number"}
+                }
+            }
+        )
+
+        @app.route("/weather")
+        def get_weather():
+            return jsonify({
+                "report": {
+                    "weather": "sunny",
+                    "temperature": 70,
+                }
+            })
+        ```
+      </Tab>
+    </Tabs>
+  </Tab>
+</Tabs>
+
+<Note>
+  Ready to accept real payments? See [Running on Mainnet](#running-on-mainnet) for production setup.
+</Note>
+
+**Payment Middleware Configuration Interface:**
+
+```typescript  theme={null}
+interface PaymentMiddlewareConfig {
+  description?: string;               // Description of the payment
+  mimeType?: string;                  // MIME type of the resource
+  maxTimeoutSeconds?: number;         // Maximum time for payment (default: 60)
+  outputSchema?: Record;              // JSON schema for the response
+  customPaywallHtml?: string;         // Custom HTML for the paywall
+  resource?: string;                  // Resource URL (defaults to request URL)
+}
+```
+
+When a request is made to these routes without payment, your server will respond with the HTTP 402 Payment Required code and payment instructions.
+
+## 3. Test Your Integration
+
+To verify:
+
+1. Make a request to your endpoint (e.g., `curl http://localhost:3000/your-endpoint`).
+2. The server responds with a 402 Payment Required, including payment instructions in the body.
+3. Complete the payment using a compatible client, wallet, or automated agent. This typically involves signing a payment payload, which is handled by the client SDK detailed in the [Quickstart for Buyers](/x402/quickstart-for-buyers).
+4. Retry the request, this time including the `X-PAYMENT` header containing the cryptographic proof of payment (payment payload).
+5. The server verifies the payment via the facilitator and, if valid, returns your actual API response (e.g., `{ "data": "Your paid API response." }`).
+
+## 4. Enhance Discovery with Metadata (Recommended)
+
+When using the CDP facilitator, your endpoints are **automatically listed** in the [x402 Bazaar](/x402/bazaar), our discovery layer that helps buyers and AI agents find services. To improve your visibility and help users understand your API:
+
+<Tip>
+  **Include descriptive metadata** in your middleware configuration:
+
+  * **`description`**: Clear explanation of what your endpoint does
+  * **`inputSchema`**: JSON schema describing required parameters
+  * **`outputSchema`**: JSON schema of your response format
+
+  This metadata helps:
+
+  * AI agents automatically understand how to use your API
+  * Developers quickly find services that meet their needs
+  * Improve your ranking in discovery results
+</Tip>
+
+Example with full metadata:
+
+```javascript  theme={null}
+{
+  price: "$0.001",
+  network: "base",
+  config: {
+    description: "Get real-time weather data including temperature, conditions, and humidity",
+    inputSchema: {
+      type: "object",
+      properties: {
+        location: {
+          type: "string",
+          description: "City name or coordinates (e.g., 'San Francisco' or '37.7749,-122.4194')"
+        },
+        units: {
+          type: "string",
+          enum: ["celsius", "fahrenheit"],
+          default: "fahrenheit"
+        }
+      },
+      required: ["location"]
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        temperature: { type: "number", description: "Current temperature" },
+        conditions: { type: "string", description: "Weather conditions (sunny, cloudy, rainy, etc.)" },
+        humidity: { type: "number", description: "Humidity percentage" }
+      }
+    }
+  }
+}
+```
+
+Learn more about the discovery layer in the [x402 Bazaar documentation](/x402/bazaar).
+
+## 5. Error Handling
+
+* If you run into trouble, check out the examples in the [repo](https://github.com/coinbase/x402/tree/main/examples) for more context and full code.
+* `npm install` the dependencies in each example
+
+## Running on Mainnet
+
+Once you've tested your integration on testnet, you're ready to accept real payments on mainnet. Here's what you need to do:
+
+<Frame>
+  <iframe width="560" height="315" src="https://www.youtube.com/embed/Zc_wBlDY2Zc" title="Running x402 on Mainnet" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen className="rounded-lg w-full" />
+</Frame>
+
+### 1. Set up CDP API Keys
+
+To use the mainnet facilitator, you'll need a Coinbase Developer Platform account:
+
+1. Sign up at [cdp.coinbase.com](https://cdp.coinbase.com)
+2. Create a new project
+3. Generate API credentials
+4. Set the following environment variables:
+   ```bash  theme={null}
+   CDP_API_KEY_ID=your-api-key-id
+   CDP_API_KEY_SECRET=your-api-key-secret
+   ```
+
+### 2. Update Your Code
+
+Replace the testnet configuration with mainnet settings:
+
+<Tabs>
+  <Tab title="Node.js">
+    ```js  theme={null}
+    // Change your imports
+    import { facilitator } from "@coinbase/x402";
+
+    // Update the middleware configuration
+    app.use(paymentMiddleware(
+      "0xYourAddress",
+      {
+        "GET /weather": {
+          price: "$0.001",
+          network: "base",
+        },
+      },
+      facilitator // this was previously { url: "https://x402.org/facilitator" }
+    ));
+
+
+    // or for Next.js
+    export const middleware = paymentMiddleware(
+      "0xYourAddress",
+      {
+        "GET /weather": {
+          price: "$0.001",
+          network: "base",
+        },
+      },
+      facilitator // this was previously { url: "https://x402.org/facilitator" }
+    ));
+    ```
+  </Tab>
+
+  <Tab title="Python">
+    ```python  theme={null}
+    from cdp.x402 import create_facilitator_config
+
+    facilitator_config = create_facilitator_config(
+        api_key_id=CDP_API_KEY_ID,
+        api_key_secret=CDP_API_KEY_SECRET,
+    )
+
+    # Update the middleware configuration (FastAPI)
+    app.middleware("http")(
+        require_payment(
+            path="/weather",
+            price="$0.001",
+            pay_to_address="0xYourAddress",
+            network_id="base", # Changed from "base-sepolia"
+            facilitator_config=facilitator_config,
+        )
+    )
+
+    # Or for Flask:
+    payment_middleware.add(
+        path="/weather",
+        price="$0.001",
+        pay_to_address="0xYourAddress",
+        network="base", # Changed from "base-sepolia"
+        facilitator_config=facilitator_config,
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### 3. Update Your Wallet
+
+Make sure your receiving wallet address (`0xYourAddress`) is a real mainnet address where you want to receive USDC payments.
+
+### 4. Test with Real Payments
+
+Before going live:
+
+1. Test with small amounts first
+2. Verify payments are arriving in your wallet
+3. Monitor the facilitator for any issues
+
+<Warning>
+  Mainnet transactions involve real money. Always test thoroughly on testnet first and start with small amounts on mainnet.
+</Warning>
+
+## Next Steps
+
+* Looking for something more advanced? Check out the [Advanced Example](https://github.com/coinbase/x402/tree/main/examples/typescript/servers/advanced)
+* Get started as a [buyer](/x402/quickstart-for-buyers)
+
+For questions or support, join our [Discord](https://discord.gg/invite/cdp).
+
+## Summary
+
+This quickstart covered:
+
+* Installing the x402 SDK and relevant middleware
+* Adding payment middleware to your API and configuring it
+* Testing your integration
+
+Your API is now ready to accept crypto payments through x402.
+
+
+
+
+# How x402 Works
+
+This page explains the complete payment flow in x402, from initial request to payment settlement.
+
+## Overview
+
+x402 enables programmatic payments over HTTP using a simple request-response flow. When a client requests a paid resource, the server responds with payment requirements, the client submits payment, and the server delivers the resource.
+
+## Payment Flow
+
+<img src="https://mintcdn.com/coinbase-prod/-uP70_EV6KGCA5Hq/x402/images/x402-protocol-flow.png?fit=max&auto=format&n=-uP70_EV6KGCA5Hq&q=85&s=d9dd623f1ff6ccc8092ab994c23c8c59" data-og-width="2984" width="2984" data-og-height="1725" height="1725" data-path="x402/images/x402-protocol-flow.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/coinbase-prod/-uP70_EV6KGCA5Hq/x402/images/x402-protocol-flow.png?w=280&fit=max&auto=format&n=-uP70_EV6KGCA5Hq&q=85&s=fd270b61d4ca043ed17da4ed179b2c66 280w, https://mintcdn.com/coinbase-prod/-uP70_EV6KGCA5Hq/x402/images/x402-protocol-flow.png?w=560&fit=max&auto=format&n=-uP70_EV6KGCA5Hq&q=85&s=1757b276812f2d884d88f18b345928c6 560w, https://mintcdn.com/coinbase-prod/-uP70_EV6KGCA5Hq/x402/images/x402-protocol-flow.png?w=840&fit=max&auto=format&n=-uP70_EV6KGCA5Hq&q=85&s=4d1de430e1d2e19f0a09560106ce885a 840w, https://mintcdn.com/coinbase-prod/-uP70_EV6KGCA5Hq/x402/images/x402-protocol-flow.png?w=1100&fit=max&auto=format&n=-uP70_EV6KGCA5Hq&q=85&s=e8b34ae4370ac3c2b2373d0681383ce7 1100w, https://mintcdn.com/coinbase-prod/-uP70_EV6KGCA5Hq/x402/images/x402-protocol-flow.png?w=1650&fit=max&auto=format&n=-uP70_EV6KGCA5Hq&q=85&s=bd4a806edefdc793bfc4850d92cfb1f4 1650w, https://mintcdn.com/coinbase-prod/-uP70_EV6KGCA5Hq/x402/images/x402-protocol-flow.png?w=2500&fit=max&auto=format&n=-uP70_EV6KGCA5Hq&q=85&s=7fc035915f06c4a4da0c2946fb5a0948 2500w" />
+
+### Step-by-Step Process
+
+1. **Client makes HTTP request** - The [client](/x402/core-concepts/client-server) sends a standard HTTP request to a resource server for a protected endpoint.
+
+2. **Server responds with 402** - The resource server returns an [HTTP 402 Payment Required](/x402/core-concepts/http-402) status code with payment details in the response body.
+
+3. **Client creates payment** - The client examines the payment requirements and creates a payment payload using their [wallet](/x402/core-concepts/wallet) based on the specified scheme.
+
+4. **Client resubmits with payment** - The client sends the same HTTP request again, this time including the `X-PAYMENT` header containing the signed payment payload.
+
+5. **Server verifies payment** - The resource server validates the payment payload either:
+   * Locally (if running their own verification)
+   * Via a [facilitator](/x402/core-concepts/facilitator) service (recommended)
+
+6. **Facilitator validates** - If using a facilitator, it checks the payment against the scheme and network requirements, returning a verification response.
+
+7. **Server processes request** - If payment is valid, the server fulfills the original request. If invalid, it returns another 402 response.
+
+8. **Payment settlement** - The server initiates blockchain settlement either:
+   * Directly by submitting to the blockchain
+   * Through the facilitator's `/settle` endpoint
+
+9. **Facilitator submits onchain** - The facilitator broadcasts the transaction to the blockchain based on the payment's network and waits for confirmation.
+
+10. **Settlement confirmation** - Once confirmed onchain, the facilitator returns a payment execution response.
+
+11. **Server delivers resource** - The server returns a 200 OK response with:
+    * The requested resource in the response body
+    * An `X-PAYMENT-RESPONSE` header containing the settlement details
+
+## Key Components
+
+* **[Client & Server](/x402/core-concepts/client-server)** - The roles and responsibilities of each party
+* **[Facilitator](/x402/core-concepts/facilitator)** - Optional service that handles payment verification and settlement
+* **[HTTP 402](/x402/core-concepts/http-402)** - How payment requirements are communicated
+* **[Networks & Facilitators](/x402/network-support)** - Available networks and facilitator options
+
+## Why This Design?
+
+The x402 protocol is designed to be:
+
+* **Stateless** - No sessions or authentication required
+* **HTTP-native** - Works with existing web infrastructure
+* **Blockchain-agnostic** - Supports multiple networks through facilitators
+* **Developer-friendly** - Simple integration with standard HTTP libraries
+
+## Next Steps
+
+* Ready to accept payments? See [Quickstart for Sellers](/x402/quickstart-for-sellers)
+* Want to make payments? See [Quickstart for Buyers](/x402/quickstart-for-buyers)
+* Looking for specific networks? Check [Network Support](/x402/network-support)
+
+
+
+# HTTP 402
+
+For decades, HTTP 402 Payment Required has been reserved for future use. x402 unlocks it, and [absolves the internet of its original sin](https://economyofbits.substack.com/p/marc-andreessens-original-sin).
+
+## What is HTTP 402?
+
+[HTTP 402](https://datatracker.ietf.org/doc/html/rfc7231#section-6.5.2) is a standard, but rarely used, HTTP response status code indicating that payment is required to access a resource.
+
+In x402, this status code is activated to:
+
+* Inform clients (buyers or agents) that payment is required.
+* Communicate the details of the payment, such as amount, currency, and destination address.
+* Provide the information necessary to complete the payment programmatically.
+
+## Why x402 Uses HTTP 402
+
+The primary purpose of HTTP 402 is to enable frictionless, API-native payments for accessing web resources, especially for:
+
+* Machine-to-machine (M2M) payments (e.g., AI agents).
+* Pay-per-use models such as API calls or paywalled content.
+* Micropayments without account creation or traditional payment rails.
+
+Using the 402 status code keeps x402 protocol natively web-compatible and easy to integrate into any HTTP-based service.
+
+## Summary
+
+HTTP 402 is the foundation of the x402 protocol, enabling services to declare payment requirements directly within HTTP responses. It:
+
+* Signals payment is required
+* Communicates necessary payment details
+* Integrates seamlessly with standard HTTP workflows
+
+## Next Steps
+
+* [How x402 Works](/x402/core-concepts/how-it-works) — See how HTTP 402 fits into the complete payment flow
+* [Client & Server](/x402/core-concepts/client-server) — Understand the roles in the x402 protocol
+* [Quickstart for Sellers](/x402/quickstart-for-sellers) — Start implementing HTTP 402 responses
+
+
+
+# Client / Server Flow
+
+This page explains the roles and responsibilities of the **client** and **server** in the x402 protocol.
+
+Understanding these roles is essential to designing, building, or integrating services that use x402 for programmatic payments.
+
+<Info>
+  Client refers to the technical component making an HTTP request. In practice, this is often the buyer of the resource.
+
+  Server refers to the technical component responding to the request. In practice, this is typically the seller of the resource
+</Info>
+
+## Client Role
+
+The client is the entity that initiates a request to access a paid resource.
+
+Clients can include:
+
+* Human-operated applications
+* Autonomous agents
+* Programmatic services acting on behalf of users or systems
+
+### Responsibilities
+
+* **Initiate requests:** Send an HTTP request to the resource server.
+* **Handle payment requirements:** Read the `402 Payment Required` response and extract payment details.
+* **Prepare payment payload:** Use the provided payment requirements to construct a valid payment payload.
+* **Resubmit request with payment:** Retry the request with the `X-PAYMENT` header containing the signed payment payload.
+
+Clients do not need to manage accounts, credentials, or session tokens beyond their crypto wallet. All interactions are stateless and occur over standard HTTP requests.
+
+# Server Role
+
+The server is the resource provider enforcing payment for access to its services.
+
+Servers can include:
+
+* API services
+* Content providers
+* Any HTTP-accessible resource requiring monetization
+
+### Responsibilities
+
+* **Define payment requirements:** Respond to unauthenticated requests with an HTTP `402 Payment Required`, including all necessary payment details in the response body.
+* **Verify payment payloads:** Validate incoming payment payloads, either locally or by using a facilitator service.
+* **Settle transactions:** Upon successful verification, submit the payment for settlement.
+* **Provide the resource:** Once payment is confirmed, return the requested resource to the client.
+
+Servers do not need to manage client identities or maintain session state. Verification and settlement are handled per request.
+
+## How It Works
+
+For a detailed explanation of the complete payment flow between clients and servers, see [How x402 Works](/x402/core-concepts/how-it-works).
+
+## Summary
+
+In the x402 protocol:
+
+* The **client** requests resources and supplies the signed payment payload.
+* The **server** enforces payment requirements, verifies transactions, and provides the resource upon successful payment.
+
+This interaction is stateless, HTTP-native, and compatible with both human applications and automated agents.
+
+Next, explore:
+
+* [How x402 Works](/x402/core-concepts/how-it-works) — see the complete payment flow
+* [Facilitator](/x402/core-concepts/facilitator) — how servers verify and settle payments
+* [HTTP 402](/x402/core-concepts/http-402) — how servers communicate payment requirements to clients
+
+
+# Facilitator
+
+This page explains the role of the **facilitator** in the x402 protocol.
+
+The facilitator is an optional but recommended service that simplifies the process of verifying and settling payments between clients (buyers) and servers (sellers).
+
+# What is a Facilitator?
+
+The facilitator is a service that:
+
+* Verifies payment payloads submitted by clients.
+* Settles payments on the blockchain on behalf of servers.
+
+By using a facilitator, servers do not need to maintain direct blockchain connectivity or implement payment verification logic themselves. This reduces operational complexity and ensures accurate, real-time validation of transactions.
+
+## Facilitator Responsibilities
+
+* **Verify payments:** Confirm that the client's payment payload meets the server's declared payment requirements.
+* **Settle payments:** Submit validated payments to the blockchain and monitor for confirmation.
+* **Provide responses:** Return verification and settlement results to the server, allowing the server to decide whether to fulfill the client's request.
+
+The facilitator does not hold funds or act as a custodian - it performs verification and execution of onchain transactions based on signed payloads provided by clients.
+
+## Why Use a Facilitator?
+
+Using a facilitator provides:
+
+* **Reduced operational complexity:** Servers do not need to interact directly with blockchain nodes.
+* **Protocol consistency:** Standardized verification and settlement flows across services.
+* **Faster integration:** Services can start accepting payments with minimal blockchain-specific development.
+
+While it is possible to implement verification and settlement locally, using a facilitator accelerates adoption and ensures correct protocol behavior.
+
+## CDP's Facilitator
+
+Coinbase Developer Platform (CDP) operates a hosted facilitator service.
+
+CDP's x402 facilitator offers:
+
+* **Fee-free USDC payments on Base:** It currently processes transactions without additional fees, allowing sellers to receive 100% of the payment.
+* **USDC-only support:** Exclusive support for USDC as the payment asset (for the time being).
+* **High performance settlement:** Payments are submitted to the Base network with fast confirmation times and high throughput.
+
+To get started with CDP's facilitator, see the [quickstart for sellers](/x402/quickstart-for-sellers).
+
+Using CDP's facilitator allows sellers to quickly integrate payments without managing blockchain infrastructure, while providing a predictable and low-cost experience for buyers.
+
+## Available Facilitators
+
+For a list of available facilitators and the networks they support, see [Network Support](/x402/network-support).
+
+## How It Works
+
+To understand how facilitators fit into the complete x402 payment flow, see [How x402 Works](/x402/core-concepts/how-it-works).
+
+## Summary
+
+The facilitator acts as an independent verification and settlement layer within the x402 protocol. It helps servers confirm payments and submit transactions onchain without requiring direct blockchain infrastructure.
+
+Coinbase's hosted facilitator simplifies this further by offering a ready-to-use, fee-free environment for USDC payments on Base.
+
+Next, explore:
+
+* [How x402 Works](/x402/core-concepts/how-it-works) — see the complete payment flow
+* [Network Support](/x402/network-support) — find available facilitators and networks
+* [HTTP 402](/x402/core-concepts/http-402) — understand how payment requirements are communicated
+
+# Wallet
+
+This page explains the role of the **wallet** in the x402 protocol.
+
+In x402, a wallet is both a payment mechanism and a form of unique identity for buyers and sellers. Wallet addresses are used to send, receive, and verify payments, while also serving as identifiers within the protocol.
+
+## Role of the Wallet
+
+### For Buyers
+
+Buyers use wallets to:
+
+* Store USDC
+* Sign payment payloads
+* Authorize onchain payments programmatically
+
+Wallets enable buyers, including AI agents, to transact without account creation or credential management.
+
+### For Sellers
+
+Sellers use wallets to:
+
+* Receive USDC payments
+* Define their payment destination within server configurations
+
+A seller's wallet address is included in the payment requirements provided to buyers.
+
+[CDP's Server Wallet](/server-wallets/v1/concepts/wallets) is our recommended option for programmatic payments and secure key management.
+
+## Summary
+
+* Wallets enable programmatic, permissionless payments in x402.
+* Buyers use wallets to pay for services.
+* Sellers use wallets to receive payments.
+* Wallet addresses also act as unique identifiers within the protocol.
+
+Next, explore:
+
+* [How x402 Works](/x402/core-concepts/how-it-works) — See how wallets fit into the payment flow
+* [Client & Server](/x402/core-concepts/client-server) — Understand buyer and seller roles
+* [Quickstart for Sellers](/x402/quickstart-for-sellers) — Set up your receiving wallet
+* [Quickstart for Buyers](/x402/quickstart-for-buyers) — Configure your payment wallet
