@@ -14,8 +14,8 @@
     "ethers": "^6.9.0",
     "dotenv": "^16.3.1",
     "cors": "^2.8.5",
-    "x402-express": "latest",
-    "@coinbase/x402": "latest"
+    "x402": "latest",
+    "@coinbase/cdp-sdk": "latest"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

@@ -1,8 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { paymentMiddleware } from 'x402-express';
-import { facilitator } from '@coinbase/x402';
+// X402 SDK imports - will be available after npm install
+// import { paymentMiddleware } from 'x402';
+// import { CdpClient } from '@coinbase/cdp-sdk';
 
 dotenv.config();
 
