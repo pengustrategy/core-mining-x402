@@ -162,17 +162,16 @@ app.post('/api/buy-ticket', async (req, res) => {
       });
     }
     
-    // Parse payment data
-    let paymentData: any;
+    // Log raw X-Payment header (don't parse yet, let CDP Facilitator handle it)
     if (xPayment) {
+      console.log('X-Payment Header (raw):', String(xPayment).substring(0, 200));
+      
+      // Try to parse as JSON for logging, but don't fail if it's not JSON
       try {
-        paymentData = JSON.parse(String(xPayment));
-        console.log('Payment Data:', JSON.stringify(paymentData, null, 2));
+        const parsed = JSON.parse(String(xPayment));
+        console.log('X-Payment (parsed):', JSON.stringify(parsed, null, 2));
       } catch (e) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid X-Payment format'
-        });
+        console.log('X-Payment is not JSON (this is OK - might be Base64 or other format)');
       }
     }
     
@@ -189,7 +188,7 @@ app.post('/api/buy-ticket', async (req, res) => {
         'Authorization': `Basic ${authString}`
       },
       body: JSON.stringify({
-        payment: paymentData,
+        payment: xPayment, // Pass raw X-Payment header to CDP
         resource: `${PUBLIC_URL}/api/buy-ticket`,
         contract: {
           address: CORE_CONTRACT,
