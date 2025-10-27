@@ -256,6 +256,76 @@ app.post('/api/buy-ticket', async (req, res) => {
 // Health & Info Endpoints
 // ═══════════════════════════════════════════════════════════
 
+// X402 Manifest Endpoint (CRITICAL for 402scan discovery!)
+app.get('/.well-known/x402/manifest', (req, res) => {
+  res.json({
+    x402Version: 1,
+    name: 'Core Mining Tickets',
+    description: 'Zero-gas mining ticket system on Base. Pay 5 USDC per ticket, mine CORE tokens with 6h mining + 24h grace period.',
+    icon: '🎫',
+    network: 'base',
+    chainId: 8453,
+    contract: CORE_CONTRACT,
+    resources: [
+      {
+        id: 'buy-tickets',
+        name: 'Buy Mining Tickets',
+        description: 'Purchase 1-5 mining tickets. Each ticket costs 5 USDC and provides 6 hours of CORE token mining plus 24-hour grace period to claim rewards.',
+        endpoint: `${PUBLIC_URL}/api/buy-ticket`,
+        methods: ['POST'],
+        network: 'base',
+        chainId: 8453,
+        asset: USDC_CONTRACT,
+        assetSymbol: 'USDC',
+        assetDecimals: 6,
+        recipient: CORE_CONTRACT,
+        pricing: {
+          type: 'variable',
+          baseAmount: TICKET_PRICE_RAW.toString(),
+          description: '5 USDC per ticket (1-5 tickets supported)',
+          formula: 'ticketCount × 5 USDC'
+        },
+        inputSchema: {
+          type: 'object',
+          properties: {
+            userAddress: {
+              type: 'string',
+              pattern: '^0x[a-fA-F0-9]{40}$',
+              description: 'Ethereum address to receive tickets'
+            },
+            ticketCount: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 5,
+              description: 'Number of tickets to purchase'
+            }
+          },
+          required: ['userAddress', 'ticketCount']
+        },
+        outputSchema: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            message: { type: 'string' },
+            transaction: { type: 'string' },
+            ticketIds: { type: 'array', items: { type: 'number' } },
+            userAddress: { type: 'string' },
+            ticketCount: { type: 'number' },
+            totalCost: { type: 'string' },
+            nextSteps: { type: 'array', items: { type: 'string' } }
+          }
+        }
+      }
+    ],
+    metadata: {
+      tags: ['mining', 'defi', 'base', 'gasless', 'eip-3009'],
+      category: 'gaming',
+      version: '1.0.0',
+      updated: new Date().toISOString()
+    }
+  });
+});
+
 app.get('/health', (req, res) => {
   const hasCredentials = !!(CDP_API_KEY_ID && CDP_API_KEY_SECRET);
   
@@ -271,6 +341,11 @@ app.get('/health', (req, res) => {
     configuration: {
       cdpConfigured: hasCredentials,
       x402Compliant: true
+    },
+    endpoints: {
+      manifest: `${PUBLIC_URL}/.well-known/x402/manifest`,
+      buyTicket: `${PUBLIC_URL}/api/buy-ticket`,
+      health: `${PUBLIC_URL}/health`
     }
   });
 });
@@ -338,6 +413,7 @@ app.get('/', (req, res) => {
       <div class="card">
         <h2>🔗 Links</h2>
         <ul>
+          <li><a href="/.well-known/x402/manifest">X402 Manifest</a> ⭐ REQUIRED</li>
           <li><a href="/health">Health Check</a></li>
           <li><a href="https://www.x402scan.com/recipient/${CORE_CONTRACT.toLowerCase()}/resources">View on X402Scan</a></li>
           <li><a href="https://basescan.org/address/${CORE_CONTRACT}">BaseScan</a></li>
