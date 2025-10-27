@@ -1,9 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-// X402 SDK imports - will be available after npm install
-// import { paymentMiddleware } from 'x402';
-// import { CdpClient } from '@coinbase/cdp-sdk';
+import { ethers } from 'ethers';
 
 dotenv.config();
 
@@ -14,18 +12,23 @@ dotenv.config();
 const PORT = process.env.PORT || 3000;
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 
-// Smart Contract Addresses
+// Smart Contract Addresses (Base Mainnet)
 const CORE_CONTRACT = '0xC3049467B6c956b84ABEE8c027bbAe6D6B60f29f';
 const USDC_CONTRACT = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-
-// Your receiving wallet address (where USDC payments go)
 const RECEIVING_ADDRESS = process.env.RECEIVING_ADDRESS || CORE_CONTRACT;
 
-// Validate CDP credentials
-if (!process.env.CDP_API_KEY_ID || !process.env.CDP_API_KEY_SECRET) {
+// CDP API Configuration
+const CDP_API_KEY_ID = process.env.CDP_API_KEY_ID;
+const CDP_API_KEY_SECRET = process.env.CDP_API_KEY_SECRET;
+
+// Pricing
+const TICKET_PRICE_USDC = 5; // 5 USDC per ticket
+const TICKET_PRICE_RAW = 5_000000; // 5 USDC (6 decimals)
+
+// Validate credentials
+if (!CDP_API_KEY_ID || !CDP_API_KEY_SECRET) {
   console.error('⚠️  WARNING: CDP API credentials not configured');
-  console.error('   Set CDP_API_KEY_ID and CDP_API_KEY_SECRET in environment variables');
-  console.error('   Mainnet payments will not work without these credentials');
+  console.error('   Set CDP_API_KEY_ID and CDP_API_KEY_SECRET');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -34,9 +37,8 @@ if (!process.env.CDP_API_KEY_ID || !process.env.CDP_API_KEY_SECRET) {
 
 const app = express();
 
-// CORS configuration
 app.use(cors({
-  origin: '*', // TODO: Restrict to your domains in production
+  origin: '*',
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'X-Payment', 'Authorization']
@@ -51,134 +53,104 @@ app.use((req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// X402 Payment Middleware - Official Implementation
+// X402 Payment Middleware (Manual Implementation)
 // ═══════════════════════════════════════════════════════════
 
-/**
- * Official X402 Payment Middleware
- * 
- * This middleware automatically handles:
- * 1. Detecting unpaid requests
- * 2. Returning HTTP 402 with proper payment schema
- * 3. Verifying X-PAYMENT headers
- * 4. Settling payments via CDP Facilitator
- * 5. Returning X-PAYMENT-RESPONSE headers
- * 
- * Documentation: https://docs.cdp.coinbase.com/x402/quickstart-for-sellers
- */
-
-app.use(paymentMiddleware(
-  RECEIVING_ADDRESS, // Your wallet address to receive payments
-  {
-    // Route: POST /api/buy-ticket
-    "POST /api/buy-ticket": {
-      price: "$5.00", // USDC price per ticket (will multiply by count)
-      network: "base", // Base mainnet
+app.use((req, res, next) => {
+  if (req.path === '/api/buy-ticket' && req.method === 'POST') {
+    const xPayment = req.headers['x-payment'];
+    
+    if (!xPayment) {
+      const ticketCount = parseInt(req.body?.ticketCount || '1');
+      const totalCost = TICKET_PRICE_RAW * ticketCount;
       
-      // X402 Bazaar metadata for service discovery
-      config: {
-        description: "Purchase mining tickets with gasless USDC payments. Each ticket provides 6 hours of CORE token mining plus 24-hour grace period to claim rewards.",
-        
-        // Input schema - helps AI agents understand how to use the API
-        inputSchema: {
-          type: "object",
-          properties: {
-            userAddress: {
-              type: "string",
-              pattern: "^0x[a-fA-F0-9]{40}$",
-              description: "Ethereum address to receive mining tickets"
+      return res.status(402)
+        .header('X-402-Version', '1')
+        .header('X-402-Network', 'base')
+        .header('X-402-Asset', USDC_CONTRACT)
+        .json({
+          x402Version: 1,
+          error: 'Payment required',
+          message: `Purchase ${ticketCount} mining ticket(s) for ${ticketCount * TICKET_PRICE_USDC} USDC`,
+          accepts: [{
+            scheme: 'exact',
+            network: 'base',
+            chainId: 8453,
+            maxAmountRequired: totalCost.toString(),
+            resource: `${PUBLIC_URL}/api/buy-ticket`,
+            description: `Purchase ${ticketCount} mining ticket(s) - ${ticketCount * TICKET_PRICE_USDC} USDC for 6h mining + 24h grace`,
+            mimeType: 'application/json',
+            payTo: CORE_CONTRACT,
+            maxTimeoutSeconds: 300,
+            asset: USDC_CONTRACT,
+            assetName: 'USDC',
+            assetDecimals: 6,
+            metadata: {
+              serviceName: 'Core Mining Tickets',
+              pricePerTicket: `${TICKET_PRICE_USDC} USDC`,
+              miningDuration: '6 hours',
+              gracePeriod: '24 hours'
             },
-            ticketCount: {
-              type: "integer",
-              minimum: 1,
-              maximum: 5,
-              description: "Number of tickets to purchase (1-5 max per address)"
+            config: {
+              inputSchema: {
+                type: "object",
+                properties: {
+                  userAddress: {
+                    type: "string",
+                    pattern: "^0x[a-fA-F0-9]{40}$",
+                    description: "Ethereum address to receive tickets"
+                  },
+                  ticketCount: {
+                    type: "integer",
+                    minimum: 1,
+                    maximum: 5,
+                    description: "Number of tickets (1-5 max)"
+                  }
+                },
+                required: ["userAddress", "ticketCount"]
+              },
+              outputSchema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean" },
+                  message: { type: "string" },
+                  transaction: { type: "string" },
+                  ticketIds: { type: "array", items: { type: "number" } },
+                  totalCost: { type: "string" }
+                }
+              }
             }
-          },
-          required: ["userAddress", "ticketCount"]
-        },
-        
-        // Output schema - describes the response format
-        outputSchema: {
-          type: "object",
-          properties: {
-            success: {
-              type: "boolean",
-              description: "Whether the purchase was successful"
-            },
-            message: {
-              type: "string",
-              description: "Success or error message"
-            },
-            transaction: {
-              type: "string",
-              description: "Transaction hash on Base network"
-            },
-            ticketIds: {
-              type: "array",
-              items: { type: "number" },
-              description: "Array of purchased ticket IDs"
-            },
-            userAddress: {
-              type: "string",
-              description: "Address that received the tickets"
-            },
-            ticketCount: {
-              type: "number",
-              description: "Number of tickets purchased"
-            },
-            totalCost: {
-              type: "string",
-              description: "Total cost in USDC"
-            },
-            nextSteps: {
-              type: "array",
-              items: { type: "string" },
-              description: "Instructions for claiming rewards"
-            }
-          }
-        },
-        
-        // Additional metadata for X402 Bazaar
-        mimeType: "application/json",
-        maxTimeoutSeconds: 300 // 5 minutes for transaction
-      }
+          }],
+          payer: req.body?.userAddress
+        });
     }
-  },
-  facilitator // Official CDP facilitator for mainnet
-));
+    
+    console.log('✅ X-Payment received');
+  }
+  
+  next();
+});
 
 // ═══════════════════════════════════════════════════════════
-// API Route Handlers
+// API Routes
 // ═══════════════════════════════════════════════════════════
 
-/**
- * POST /api/buy-ticket
- * 
- * Purchase mining tickets with X402 gasless payments
- * 
- * The x402-express middleware handles:
- * - Payment verification
- * - Contract interaction via CDP Facilitator
- * - Gas fees (paid by CDP)
- * 
- * This handler just needs to return the success response
- */
 app.post('/api/buy-ticket', async (req, res) => {
   try {
     const { userAddress, ticketCount } = req.body;
+    const xPayment = req.headers['x-payment'];
     
     console.log('═══════════════════════════════════════');
-    console.log('✅ Payment Verified - Processing Request');
+    console.log('📨 Buy Ticket Request');
     console.log('User:', userAddress);
-    console.log('Tickets:', ticketCount);
-    console.log('═══════════════════════════════════════');
+    console.log('Count:', ticketCount);
+    console.log('Has X-Payment:', !!xPayment);
     
-    // Validate input
+    // Validation
     if (!userAddress || !/^0x[a-fA-F0-9]{40}$/i.test(userAddress)) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid Ethereum address format'
+        error: 'Invalid Ethereum address'
       });
     }
     
@@ -186,97 +158,135 @@ app.post('/api/buy-ticket', async (req, res) => {
     if (!count || count < 1 || count > 5) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid ticket count (must be 1-5)'
+        error: 'Invalid ticket count (1-5)'
       });
     }
     
-    // At this point, payment has been verified and settled by the middleware
-    // The contract has been called via buyTicketsWithAuthorization
-    // User now has tickets in their account
+    // Parse payment data
+    let paymentData: any;
+    if (xPayment) {
+      try {
+        paymentData = JSON.parse(String(xPayment));
+        console.log('Payment Data:', JSON.stringify(paymentData, null, 2));
+      } catch (e) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid X-Payment format'
+        });
+      }
+    }
     
-    // Generate ticket IDs (approximate - would need to query contract for actual IDs)
-    const ticketIds = Array.from({ length: count }, (_, i) => i + 1);
+    // Call CDP Facilitator API
+    console.log('\n🔐 Calling CDP Facilitator...');
     
-    // Return success response
+    const facilitatorUrl = 'https://api.cdp.coinbase.com/platform/v2/x402/settle';
+    const authString = Buffer.from(`${CDP_API_KEY_ID}:${CDP_API_KEY_SECRET}`).toString('base64');
+    
+    const facilitatorResponse = await fetch(facilitatorUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${authString}`
+      },
+      body: JSON.stringify({
+        payment: paymentData,
+        resource: `${PUBLIC_URL}/api/buy-ticket`,
+        contract: {
+          address: CORE_CONTRACT,
+          function: 'buyTicketsWithAuthorization',
+          network: 'base',
+          chainId: 8453
+        },
+        params: {
+          user: userAddress,
+          count: count
+        }
+      })
+    });
+    
+    const responseText = await facilitatorResponse.text();
+    console.log('Facilitator Status:', facilitatorResponse.status);
+    console.log('Response:', responseText.substring(0, 500));
+    
+    let facilitatorData;
+    try {
+      facilitatorData = JSON.parse(responseText);
+    } catch (e) {
+      facilitatorData = { raw: responseText };
+    }
+    
+    if (!facilitatorResponse.ok) {
+      console.error('❌ CDP Facilitator error');
+      return res.status(502).json({
+        success: false,
+        error: 'Payment processing failed',
+        status: facilitatorResponse.status,
+        details: facilitatorData
+      });
+    }
+    
+    console.log('✅ Payment successful!');
+    console.log('═══════════════════════════════════════');
+    
     res.json({
       success: true,
-      message: `Successfully purchased ${count} mining ticket(s)!`,
-      transaction: res.locals.transactionHash || 'pending', // Set by middleware
-      ticketIds,
+      message: `Successfully purchased ${count} ticket(s)!`,
+      transaction: facilitatorData.transaction || facilitatorData.txHash || 'pending',
+      ticketIds: Array.from({ length: count }, (_, i) => i + 1),
       userAddress,
       ticketCount: count,
-      totalCost: `${count * 5} USDC`,
+      totalCost: `${count * TICKET_PRICE_USDC} USDC`,
       nextSteps: [
         `✅ ${count} ticket(s) created for ${userAddress}`,
-        '⏰ Wait 6+ hours for mining to complete',
-        '💎 Claim your CORE tokens (6-30 hours window)',
-        '⚠️  Must claim within 30 hours or tickets expire'
+        '⏰ Wait 6+ hours for mining',
+        '💎 Claim CORE tokens (6-30h window)',
+        '⚠️  Expires after 30 hours'
       ]
     });
     
   } catch (error: any) {
-    console.error('❌ Error processing request:', error);
+    console.error('❌ Error:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Internal server error',
-      message: 'Failed to process ticket purchase. Please try again.'
+      error: error.message
     });
   }
 });
 
 // ═══════════════════════════════════════════════════════════
-// Health Check & Status Endpoints
+// Health & Info Endpoints
 // ═══════════════════════════════════════════════════════════
 
 app.get('/health', (req, res) => {
-  const hasCredentials = !!(process.env.CDP_API_KEY_ID && process.env.CDP_API_KEY_SECRET);
+  const hasCredentials = !!(CDP_API_KEY_ID && CDP_API_KEY_SECRET);
   
   res.json({
     status: 'ok',
-    service: 'Core Mining Tickets - X402 Protocol',
+    service: 'Core Mining Tickets - X402',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     network: 'Base Mainnet',
     chainId: 8453,
     contract: CORE_CONTRACT,
     usdc: USDC_CONTRACT,
-    receivingAddress: RECEIVING_ADDRESS,
     configuration: {
       cdpConfigured: hasCredentials,
-      x402Compliant: true,
-      facilitator: 'CDP (Coinbase)',
-      network: 'base'
-    },
-    endpoints: {
-      buyTicket: `${PUBLIC_URL}/api/buy-ticket`,
-      health: `${PUBLIC_URL}/health`,
-      homepage: `${PUBLIC_URL}/`
-    },
-    x402: {
-      protocol: 'x402',
-      version: 1,
-      gasless: true,
-      asset: 'USDC',
-      network: 'base'
+      x402Compliant: true
     }
   });
 });
 
-// ═══════════════════════════════════════════════════════════
-// Homepage with Configuration Status
-// ═══════════════════════════════════════════════════════════
-
 app.get('/', (req, res) => {
-  const hasCredentials = !!(process.env.CDP_API_KEY_ID && process.env.CDP_API_KEY_SECRET);
+  const hasCredentials = !!(CDP_API_KEY_ID && CDP_API_KEY_SECRET);
   
   res.send(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Core Mining Tickets - X402 Service</title>
+      <title>Core Mining Tickets - X402</title>
       <style>
         body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          font-family: system-ui, -apple-system, sans-serif;
           max-width: 900px;
           margin: 50px auto;
           padding: 30px;
@@ -289,179 +299,60 @@ app.get('/', (req, res) => {
           border-radius: 16px;
           padding: 30px;
           margin: 20px 0;
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
         }
-        h1 { margin-top: 0; font-size: 2.5em; }
+        h1 { font-size: 2.5em; margin: 0; }
         .status { 
           display: inline-block;
           padding: 5px 15px;
           border-radius: 20px;
-          margin: 5px 0;
+          margin: 10px 5px;
           font-weight: bold;
         }
-        .status.ok { background: rgba(34, 197, 94, 0.8); }
-        .status.warn { background: rgba(251, 146, 60, 0.8); }
-        .status.error { background: rgba(239, 68, 68, 0.8); }
-        a { color: #ffd700; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        code {
+        .ok { background: rgba(34, 197, 94, 0.8); }
+        .warn { background: rgba(251, 146, 60, 0.8); }
+        a { color: #ffd700; }
+        code { 
           background: rgba(0, 0, 0, 0.4);
           padding: 3px 8px;
           border-radius: 4px;
-          font-family: 'Monaco', 'Courier New', monospace;
-          font-size: 0.9em;
         }
-        pre {
-          background: rgba(0, 0, 0, 0.4);
-          padding: 15px;
-          border-radius: 8px;
-          overflow-x: auto;
-          font-size: 0.85em;
-        }
-        .info-grid {
-          display: grid;
-          grid-template-columns: 150px 1fr;
-          gap: 10px;
-          margin: 15px 0;
-        }
-        .info-label { font-weight: bold; opacity: 0.9; }
-        ul { line-height: 1.8; }
-        .badge {
-          display: inline-block;
-          padding: 3px 10px;
-          border-radius: 12px;
-          background: rgba(255, 255, 255, 0.2);
-          font-size: 0.85em;
-          margin-left: 10px;
-        }
+        ul { line-height: 2; }
       </style>
     </head>
     <body>
       <div class="card">
         <h1>🎫 Core Mining Tickets</h1>
-        <p style="font-size: 1.2em; opacity: 0.95;">
-          Gasless USDC payments powered by X402 Protocol
-        </p>
-        
-        <div class="status ${hasCredentials ? 'ok' : 'error'}">
-          ${hasCredentials ? '✅ X402 Service Active' : '⚠️ CDP Credentials Missing'}
-        </div>
-        <span class="badge">v1.0.0</span>
-        <span class="badge">X402 Compliant</span>
-      </div>
-      
-      <div class="card">
-        <h2>📊 Service Information</h2>
-        <div class="info-grid">
-          <div class="info-label">Network:</div>
-          <div>Base Mainnet (Chain ID: 8453)</div>
-          
-          <div class="info-label">Contract:</div>
-          <div><code>${CORE_CONTRACT}</code></div>
-          
-          <div class="info-label">Asset:</div>
-          <div>USDC (<code>${USDC_CONTRACT}</code>)</div>
-          
-          <div class="info-label">Price:</div>
-          <div>5 USDC per ticket (1-5 tickets max)</div>
-          
-          <div class="info-label">Receiver:</div>
-          <div><code>${RECEIVING_ADDRESS}</code></div>
-          
-          <div class="info-label">Protocol:</div>
-          <div>X402 v1 (HTTP 402 Payment Required)</div>
-          
-          <div class="info-label">Facilitator:</div>
-          <div>CDP (Coinbase Developer Platform)</div>
+        <p>Gasless USDC Payments via X402 Protocol</p>
+        <div class="status ${hasCredentials ? 'ok' : 'warn'}">
+          ${hasCredentials ? '✅ X402 Active' : '⚠️ Configure CDP'}
         </div>
       </div>
       
       <div class="card">
-        <h2>🔗 Quick Links</h2>
-        <ul style="list-style: none; padding: 0;">
-          <li>🏥 <a href="/health">Service Health Check</a></li>
-          <li>🔍 <a href="https://www.x402scan.com/recipient/${CORE_CONTRACT.toLowerCase()}/resources" target="_blank">View on X402Scan</a></li>
-          <li>📜 <a href="https://basescan.org/address/${CORE_CONTRACT}" target="_blank">View Contract on BaseScan</a></li>
-          <li>📚 <a href="https://docs.cdp.coinbase.com/x402" target="_blank">X402 Protocol Documentation</a></li>
-          <li>💬 <a href="https://discord.gg/invite/cdp" target="_blank">CDP Discord Support</a></li>
-        </ul>
+        <h2>📊 Service Info</h2>
+        <p><strong>Network:</strong> Base Mainnet (8453)</p>
+        <p><strong>Contract:</strong> <code>${CORE_CONTRACT}</code></p>
+        <p><strong>Price:</strong> 5 USDC per ticket</p>
+        <p><strong>Protocol:</strong> X402 v1</p>
       </div>
       
       <div class="card">
-        <h2>🔧 Configuration Status</h2>
+        <h2>🔗 Links</h2>
         <ul>
-          <li>CDP API Key ID: ${process.env.CDP_API_KEY_ID ? '<span style="color: #4ade80;">✅ Configured</span>' : '<span style="color: #ef4444;">❌ Missing</span>'}</li>
-          <li>CDP API Secret: ${process.env.CDP_API_KEY_SECRET ? '<span style="color: #4ade80;">✅ Configured</span>' : '<span style="color: #ef4444;">❌ Missing</span>'}</li>
-          <li>X402 Middleware: <span style="color: #4ade80;">✅ Official x402-express</span></li>
-          <li>Facilitator: <span style="color: #4ade80;">✅ CDP Mainnet</span></li>
-          <li>Network: <span style="color: #4ade80;">✅ Base Mainnet</span></li>
+          <li><a href="/health">Health Check</a></li>
+          <li><a href="https://www.x402scan.com/recipient/${CORE_CONTRACT.toLowerCase()}/resources">View on X402Scan</a></li>
+          <li><a href="https://basescan.org/address/${CORE_CONTRACT}">BaseScan</a></li>
         </ul>
       </div>
       
       <div class="card">
-        <h2>💡 How It Works</h2>
-        <ol style="line-height: 2;">
-          <li>User discovers service on <a href="https://www.x402scan.com" target="_blank">X402Scan</a></li>
-          <li>User requests to buy tickets</li>
-          <li>Service responds with <strong>HTTP 402 Payment Required</strong></li>
-          <li>User signs <strong>EIP-3009 USDC authorization</strong> (no gas needed)</li>
-          <li>CDP Facilitator <strong>verifies signature & executes transaction</strong></li>
-          <li>CDP pays all gas fees (completely gasless for user)</li>
-          <li>Contract creates tickets for user's address</li>
-          <li>User can mine CORE tokens for 6 hours + 24h grace period</li>
-        </ol>
+        <h2>🔧 Configuration</h2>
+        <p>CDP API Key: ${CDP_API_KEY_ID ? '✅' : '❌'}</p>
+        <p>CDP Secret: ${CDP_API_KEY_SECRET ? '✅' : '❌'}</p>
       </div>
-      
-      <div class="card">
-        <h2>🧪 Test the API</h2>
-        <p>Test X402 payment flow (returns HTTP 402):</p>
-        <pre>curl -X POST ${req.protocol}://${req.get('host')}/api/buy-ticket \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "userAddress": "0x1234567890123456789012345678901234567890",
-    "ticketCount": 1
-  }'</pre>
-        
-        <p>Expected: HTTP 402 with payment instructions</p>
-      </div>
-      
-      <div class="card">
-        <h2>🎯 Features</h2>
-        <ul>
-          <li>✅ <strong>100% Gasless</strong> - Users pay 0 ETH, only USDC</li>
-          <li>✅ <strong>CDP Facilitator</strong> - Coinbase pays all gas fees</li>
-          <li>✅ <strong>EIP-3009 Payments</strong> - Single signature authorization</li>
-          <li>✅ <strong>X402 Compliant</strong> - Official protocol implementation</li>
-          <li>✅ <strong>Auto-Discovery</strong> - Listed on X402 Bazaar</li>
-          <li>✅ <strong>AI Agent Ready</strong> - Machine-readable schemas</li>
-          <li>✅ <strong>Base Network</strong> - Fast & low-cost settlement</li>
-          <li>✅ <strong>USDC Only</strong> - Simple, stable payments</li>
-        </ul>
-      </div>
-      
-      <p style="text-align: center; opacity: 0.8; margin-top: 40px;">
-        Powered by <a href="https://docs.cdp.coinbase.com/x402" target="_blank">Coinbase X402 Protocol</a> 
-        • Zero Gas • Instant Settlement
-      </p>
     </body>
     </html>
   `);
-});
-
-// ═══════════════════════════════════════════════════════════
-// 404 Handler
-// ═══════════════════════════════════════════════════════════
-
-app.use((req, res) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Endpoint ${req.method} ${req.path} does not exist`,
-    availableEndpoints: [
-      'GET /',
-      'GET /health',
-      'POST /api/buy-ticket'
-    ]
-  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -471,40 +362,22 @@ app.use((req, res) => {
 app.listen(PORT, () => {
   console.log('╔═══════════════════════════════════════════════════════════╗');
   console.log('║                                                           ║');
-  console.log('║   🎫 Core Mining Tickets - X402 Protocol Server          ║');
+  console.log('║   🎫 Core Mining Tickets - X402 Protocol                 ║');
   console.log('║                                                           ║');
   console.log(`║   Server:    http://localhost:${PORT.toString().padEnd(32)} ║`);
   console.log('║   Network:   Base Mainnet (8453)                          ║');
   console.log(`║   Contract:  ${CORE_CONTRACT.substring(0, 20)}...   ║`);
   console.log('║                                                           ║');
-  console.log('║   ✅ Official X402 Protocol Implementation                ║');
-  console.log('║   ✅ x402-express middleware active                       ║');
-  console.log('║   ✅ CDP Facilitator configured                           ║');
-  console.log('║   ✅ Automatic X402 Bazaar listing                        ║');
+  console.log('║   ✅ X402 Protocol Implementation                         ║');
+  console.log('║   ✅ HTTP 402 Payment Required Ready                      ║');
+  console.log('║   ✅ CDP Facilitator Integration                          ║');
   console.log('║                                                           ║');
-  console.log('║   Endpoints:                                              ║');
-  console.log('║   - GET  /         (Homepage)                             ║');
-  console.log('║   - GET  /health   (Status Check)                         ║');
-  console.log('║   - POST /api/buy-ticket  (Protected by X402)             ║');
-  console.log('║                                                           ║');
-  console.log('╚═══════════════════════════════════════════════════════════╝');
+  console.log('╚═══════════════════════════════════════════════════════════╝\n');
   
-  if (!process.env.CDP_API_KEY_ID || !process.env.CDP_API_KEY_SECRET) {
-    console.log('\n⚠️  WARNING: CDP API credentials not configured!');
-    console.log('   Mainnet payments will NOT work.');
-    console.log('   Set these environment variables:');
-    console.log('   - CDP_API_KEY_ID');
-    console.log('   - CDP_API_KEY_SECRET\n');
+  if (!CDP_API_KEY_ID || !CDP_API_KEY_SECRET) {
+    console.log('⚠️  WARNING: CDP credentials not set\n');
   } else {
-    console.log('\n✅ CDP API credentials configured');
-    console.log('✅ Ready to accept mainnet USDC payments\n');
-  }
-  
-  if (process.env.NODE_ENV === 'production') {
-    console.log('🚀 Production mode');
-    console.log(`📡 Public URL: ${PUBLIC_URL}\n`);
-  } else {
-    console.log('🔧 Development mode\n');
+    console.log('✅ CDP configured - Ready for mainnet\n');
   }
 });
 
